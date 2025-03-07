@@ -1,0 +1,57 @@
+/**
+ * Process Profile Photo Upload ONLY on Registration (Not on Profile Edit)
+ */
+add_action('um_registration_set_extra_data', 'um_registration_set_profile_photo', 9999, 2);
+function um_registration_set_profile_photo($user_id, $args) {
+    if (empty($args['profile_photo'])) return;
+
+    // Ensure this only runs during registration
+    if (defined('DOING_AJAX') && DOING_AJAX) return; 
+
+    $upload_dir = wp_upload_dir();
+    $user_folder = "{$upload_dir['basedir']}/ultimatemember/{$user_id}";
+
+    if (!file_exists($user_folder)) {
+        wp_mkdir_p($user_folder);
+    }
+
+    $profile_photo = get_user_meta($user_id, 'profile_photo', true);
+    $image_path = "{$user_folder}/{$profile_photo}";
+
+    if (!file_exists($image_path)) return;
+
+    $image = wp_get_image_editor($image_path);
+    $file_info = wp_check_filetype_and_ext($image_path, $profile_photo);
+
+    if (is_wp_error($image) || empty($file_info['ext'])) return;
+
+    $ext = $file_info['ext'];
+    $new_image_name = "profile_photo.{$ext}";
+    $new_image_path = "{$user_folder}/{$new_image_name}";
+
+    $sizes = UM()->options()->get('photo_thumb_sizes');
+    $quality = UM()->options()->get('image_compression');
+
+    if (!is_wp_error($image)) {
+        $max_w = UM()->options()->get('image_max_width');
+
+        $image_info = getimagesize($image_path);
+        $src_w = $image_info[0];
+
+        if ($src_w > $max_w) {
+            $image->resize($max_w, null); // Maintain aspect ratio
+        }
+
+        $image->save($new_image_path);
+        $image->set_quality($quality);
+
+        $sizes_array = array_map(fn($size) => ['width' => $size], $sizes);
+        $image->multi_resize($sizes_array);
+
+        delete_user_meta($user_id, 'synced_profile_photo');
+
+        // ✅ Store correct profile URL
+        $profile_url = "{$upload_dir['baseurl']}/ultimatemember/{$user_id}/{$new_image_name}";
+        update_user_meta($user_id, 'profile_photo', $profile_url);
+    }
+}
